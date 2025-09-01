@@ -15,6 +15,7 @@
 #include <sbi/sbi_trap.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/sbi_hart.h>
+#include <sbi/sbi_trf.h>
 
 static int sbi_ecall_dbcn_handler(unsigned long extid, unsigned long funcid,
 				  struct sbi_trap_regs *regs,
@@ -22,6 +23,9 @@ static int sbi_ecall_dbcn_handler(unsigned long extid, unsigned long funcid,
 {
 	ulong smode = (csr_read(CSR_MSTATUS) & MSTATUS_MPP) >>
 			MSTATUS_MPP_SHIFT;
+
+	// sbi_printf("dbcn: smode = %lx, funcid = %lx\n", smode, funcid);
+	// sbi_printf("a1 = %lx, a2 = %lx\n", regs->a1, regs->a2);
 
 	switch (funcid) {
 	case SBI_EXT_DBCN_CONSOLE_WRITE:
@@ -47,8 +51,15 @@ static int sbi_ecall_dbcn_handler(unsigned long extid, unsigned long funcid,
 					SBI_DOMAIN_READ|SBI_DOMAIN_WRITE))
 			return SBI_ERR_INVALID_PARAM;
 		sbi_hart_map_saddr(regs->a1, regs->a0);
-		if (funcid == SBI_EXT_DBCN_CONSOLE_WRITE)
-			out->value = sbi_nputs((const char *)regs->a1, regs->a0);
+		if (funcid == SBI_EXT_DBCN_CONSOLE_WRITE) {
+			char buf[256];
+			if (regs->a0 > 256) {
+				sbi_printf("dbcn: console write too long: %ld bytes\n", regs->a0);
+				return SBI_ERR_FAILED;
+			}
+			copy_from_normal(buf, (const char *)regs->a1, regs->a0);
+			out->value = sbi_nputs(buf, regs->a0);
+		}
 		else
 			out->value = sbi_ngets((char *)regs->a1, regs->a0);
 		sbi_hart_unmap_saddr();

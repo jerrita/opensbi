@@ -2,45 +2,27 @@
 #include <sbi/sbi_ecall.h>
 #include <sbi/sbi_ecall_interface.h>
 #include <sbi/sbi_trap.h>
+#include <sbi/sbi_trf.h>
 #include <sbi/sbi_console.h>
 
-// _fw_start + RS_OFFSET >= _fw_end + FW_STACK_SIZE
-#define RS_OFFSET 0x200000
-
-typedef unsigned long usize;
-typedef long isize;
-
-enum trf_func_desc { INITIALIZE = 0 };
-
-struct bridge_ret {
-	isize func; // func
-	usize a1, a2, a3;
-};
-
-struct trf_call {
-	usize func_desc;
-	usize a1, a2, a3;
-};
-
-typedef struct bridge_ret *(*secure_rs_call_t)(struct trf_call sc);
-
-enum BridgedFunc { OK = 0, BBI_PUT_CHAR, BBI_PUT_STR };
+typedef struct secure_ret *(*secure_rs_call_t)(struct trf_call sc);
 
 extern char _fw_start[];
-struct bridge_ret secure_rs_call(struct trf_call sc)
+
+struct secure_ret secure_rs_call(struct trf_call sc)
 {
-	struct bridge_ret ret;
+	struct secure_ret ret;
 	secure_rs_call_t rs_func = (secure_rs_call_t)(_fw_start + RS_OFFSET);
 	__asm__ volatile("mv a0, %4\n\t" // func_desc -> a0
 			 "mv a1, %5\n\t" // a1 -> a1
 			 "mv a2, %6\n\t" // a2 -> a2
 			 "mv a3, %7\n\t" // a3 -> a3
 			 "jalr %8\n\t"	 // 调用函数
-			 "mv %0, a0\n\t" // ret.func <- a0
+			 "mv %0, a0\n\t" // ret.func_or_ret <- a0
 			 "mv %1, a1\n\t" // ret.a1 <- a1
 			 "mv %2, a2\n\t" // ret.a2 <- a2
 			 "mv %3, a3"	 // ret.a3 <- a3
-			 : "=r"(ret.func), "=r"(ret.a1), "=r"(ret.a2),
+			 : "=r"(ret.func_or_ret), "=r"(ret.a1), "=r"(ret.a2),
 			   "=r"(ret.a3) // 输出
 			 : "r"(sc.func_desc), "r"(sc.a1), "r"(sc.a2),
 			   "r"(sc.a3), "r"(rs_func)	// 输入
@@ -49,20 +31,35 @@ struct bridge_ret secure_rs_call(struct trf_call sc)
 	return ret;
 }
 
+int copy_from_normal(char *buf, const char *src, int len)
+{
+	struct trf_call sc    = { .func_desc = COPY_FROM_NORMAL,
+				  .a1	     = (usize)buf,
+				  .a2	     = (usize)src,
+				  .a3	     = len };
+	struct secure_ret ret = secure_rs_call(sc);
+	if (ret.func_or_ret != OK) {
+		sbi_printf("cfn: copy wrong...");
+		for (;;)
+			;
+	}
+	return ret.func_or_ret;
+}
+
 void secure_bridge(struct trf_call sc)
 {
-	struct bridge_ret ret = secure_rs_call(sc);
-	while (ret.func != OK) {
-		switch (ret.func) {
-		case BBI_PUT_CHAR:
+	struct secure_ret ret = secure_rs_call(sc);
+	while (ret.func_or_ret != OK) {
+		switch (ret.func_or_ret) {
+		case TBI_PUT_CHAR:
 			sbi_putc(ret.a1);
 			break;
-		case BBI_PUT_STR:
+		case TBI_PUT_STR:
 			sbi_puts((char *)ret.a1);
 			break;
 		default:
-			sbi_printf("[TRF] Unknown BridgedFunc %ld called.",
-				   ret.func);
+			sbi_printf("[TRF] Unknown func_or_ret %ld returned.\n",
+				   ret.func_or_ret);
 			while (1)
 				;
 		}

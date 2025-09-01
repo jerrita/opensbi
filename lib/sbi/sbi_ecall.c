@@ -127,6 +127,9 @@ int sbi_ecall_handler(struct sbi_trap_context *tcntx)
 	struct sbi_ecall_return out = {0};
 	bool is_0_1_spec = 0;
 
+	// sbi_printf("ecall: funcid = %lx, extid = %lx, a0 = %lx, mepc = %lx\n",
+	// 	func_id, extension_id, regs->a0, regs->mepc);
+
 	ext = sbi_ecall_find_extension(extension_id);
 	if (ext && ext->handle) {
 		ret = ext->handle(extension_id, func_id, regs, &out);
@@ -134,6 +137,7 @@ int sbi_ecall_handler(struct sbi_trap_context *tcntx)
 		    extension_id <= SBI_EXT_0_1_SHUTDOWN)
 			is_0_1_spec = 1;
 	} else {
+		sbi_printf("ext not found.\n");
 		ret = SBI_ENOTSUPP;
 	}
 
